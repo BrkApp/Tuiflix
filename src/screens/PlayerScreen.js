@@ -6,11 +6,11 @@ import {
   ActivityIndicator,
   TouchableOpacity,
 } from 'react-native';
-import { fetchStreamUrl } from '../services/scraper';
+import { resolveStreamUrl } from '../services/scraper';
 import VideoPlayer from '../components/VideoPlayer';
 
 export default function PlayerScreen({ route, navigation }) {
-  const { pageUrl, title } = route.params;
+  const { playerUrl, title } = route.params;
   const [streamUrl, setStreamUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -19,7 +19,7 @@ export default function PlayerScreen({ route, navigation }) {
     try {
       setLoading(true);
       setError(null);
-      const url = await fetchStreamUrl(pageUrl);
+      const url = await resolveStreamUrl(playerUrl);
       if (url) {
         setStreamUrl(url);
       } else {
@@ -30,7 +30,7 @@ export default function PlayerScreen({ route, navigation }) {
     } finally {
       setLoading(false);
     }
-  }, [pageUrl]);
+  }, [playerUrl]);
 
   useEffect(() => {
     loadStream();
@@ -44,7 +44,7 @@ export default function PlayerScreen({ route, navigation }) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#e50914" />
-        <Text style={styles.text}>Recherche du stream...</Text>
+        <Text style={styles.text}>Résolution du stream...</Text>
         <Text style={styles.subtext}>{title}</Text>
       </View>
     );

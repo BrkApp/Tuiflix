@@ -59,7 +59,7 @@ export default function HomeScreen({ navigation }) {
 
   const handleVideoPress = useCallback(
     (item) => {
-      navigation.navigate('Player', {
+      navigation.navigate('Detail', {
         pageUrl: item.pageUrl,
         title: item.title,
         thumbnail: item.thumbnail,
