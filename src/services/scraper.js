@@ -152,59 +152,69 @@ export async function fetchDetail(pageUrl) {
     // ── Chercher les épisodes ──
     const episodes = [];
 
-    // Pattern 1: onglets/tabs par épisode (très courant)
-    // Les CMS FR utilisent souvent .spoiler ou des divs numérotés pour les épisodes
-    const tabSelectors = [
-      '.spoiler', '.episode', '.ep-item',
-      '[id^="episode"]', '[id^="ep"]',
-      '.seria-item', '.serie-episode',
-      'div[id^="tab"]', '.tab-content > div',
-    ];
-
-    let epElements = $([]);
-    for (const sel of tabSelectors) {
-      epElements = $(sel);
-      if (epElements.length > 0) break;
-    }
-
-    if (epElements.length > 0) {
-      epElements.each((i, el) => {
+    // Pattern Flemmix : div.hostsblock contient div.ep{N}vs pour chaque épisode
+    // Chaque épisode contient des <a onclick="loadVideo('URL')"><span class="clichost">Lecteur X</span></a>
+    const hostsblock = $('.hostsblock');
+    if (hostsblock.length > 0) {
+      hostsblock.find('div[class^="ep"]').each((_, el) => {
         const $ep = $(el);
-        const epTitle =
-          $ep.find('.spoiler-title, .ep-title, b, strong').first().text().trim() ||
-          $ep.attr('title') ||
-          `Episode ${i + 1}`;
+        const className = $ep.attr('class') || '';
 
-        const players = extractPlayers($, $ep);
-        if (players.length > 0) {
-          episodes.push({
-            id: `ep-${i}`,
-            episodeNum: i + 1,
-            title: cleanText(epTitle),
-            players,
-          });
-        }
+        // Extraire le numéro d'épisode depuis la classe (ep1vs → 1, ep10vs → 10)
+        const epMatch = className.match(/^ep(\d+)vs$/);
+        if (!epMatch) return;
+
+        const epNum = parseInt(epMatch[1], 10);
+        if (epNum === 0) return; // ep00vs est toujours vide
+
+        const players = extractPlayersFromFlemmix($, $ep);
+        if (players.length === 0) return; // Épisodes futurs vides
+
+        episodes.push({
+          id: `ep-${epNum}`,
+          episodeNum: epNum,
+          title: `Episode ${epNum}`,
+          players,
+        });
       });
     }
 
-    // Pattern 2: liens d'épisodes séparés (boutons)
+    // Fallback: pattern générique (autres CMS)
     if (episodes.length === 0) {
-      const epLinks = $('a[href*="episode"], a[href*="saison"], .ep-link, .episode-link');
-      epLinks.each((i, el) => {
-        const $el = $(el);
-        const href = $el.attr('href');
-        if (href) {
-          episodes.push({
-            id: `ep-${i}`,
-            episodeNum: i + 1,
-            title: cleanText($el.text().trim() || `Episode ${i + 1}`),
-            players: [{ name: 'Lien', url: resolveUrl(href) }],
-          });
-        }
-      });
+      const genericSelectors = [
+        '.spoiler', '.episode', '.ep-item',
+        '[id^="episode"]', '[id^="ep"]',
+        'div[id^="tab"]', '.tab-content > div',
+      ];
+
+      let epElements = $([]);
+      for (const sel of genericSelectors) {
+        epElements = $(sel);
+        if (epElements.length > 0) break;
+      }
+
+      if (epElements.length > 0) {
+        epElements.each((i, el) => {
+          const $ep = $(el);
+          const epTitle =
+            $ep.find('.spoiler-title, .ep-title, b, strong').first().text().trim() ||
+            $ep.attr('title') ||
+            `Episode ${i + 1}`;
+
+          const players = extractPlayers($, $ep);
+          if (players.length > 0) {
+            episodes.push({
+              id: `ep-${i}`,
+              episodeNum: i + 1,
+              title: cleanText(epTitle),
+              players,
+            });
+          }
+        });
+      }
     }
 
-    // Pattern 3: pas d'épisodes — c'est un film, prendre les players de la page entière
+    // Fallback final : pas d'épisodes — c'est un film
     if (episodes.length === 0) {
       const players = extractPlayers($, $.root());
       episodes.push({
@@ -228,7 +238,31 @@ export async function fetchDetail(pageUrl) {
 }
 
 /**
- * Extrait tous les lecteurs vidéo d'un élément donné.
+ * Extrait les lecteurs depuis le format Flemmix.
+ * Pattern: <a onclick="loadVideo('URL')"><span class="clichost">Lecteur X</span></a>
+ */
+function extractPlayersFromFlemmix($, $ep) {
+  const players = [];
+
+  $ep.find('a').each((i, el) => {
+    const $a = $(el);
+    const onclick = $a.attr('onclick') || '';
+
+    // Extraire l'URL depuis loadVideo('...')
+    const match = onclick.match(/loadVideo\s*\(\s*'([^']+)'\s*\)/);
+    if (!match) return;
+
+    const url = match[1];
+    const name = $a.find('.clichost').text().trim() || $a.text().trim() || guessPlayerName(url, i);
+
+    players.push({ name, url });
+  });
+
+  return players;
+}
+
+/**
+ * Extrait tous les lecteurs vidéo d'un élément donné (fallback générique).
  * Retourne [{ name, url }]
  */
 function extractPlayers($, $context) {
