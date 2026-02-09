@@ -165,6 +165,21 @@ export async function fetchCatalogPage(page, category = 'serie-en-streaming') {
   }
 }
 
+/**
+ * Fetch la page films (/film-en-streaming/).
+ * Retourne la même structure que fetchCatalog mais pour les films.
+ */
+export async function fetchFilms() {
+  return fetchCatalogPage(1, 'film-en-streaming');
+}
+
+/**
+ * Fetch la page séries (/serie-en-streaming/).
+ */
+export async function fetchSeries() {
+  return fetchCatalogPage(1, 'serie-en-streaming');
+}
+
 // ─────────────────────────────────────────────
 // NIVEAU 2 : Page détail (épisodes d'une série)
 // ─────────────────────────────────────────────
