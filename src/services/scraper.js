@@ -34,8 +34,12 @@ export function getBaseUrl() {
 // ─────────────────────────────────────────────
 
 /**
- * Fetch la page d'accueil et extrait la liste des films/séries.
- * Retourne [{ id, title, thumbnail, pageUrl, year?, quality? }]
+ * Fetch la page d'accueil et extrait le catalogue.
+ * Retourne [{ id, title, thumbnail, pageUrl, season, episode, language, synopsis }]
+ *
+ * Deux sources sur Flemmix :
+ * 1. Carousel : .owl-carousel.caroustyle .item (films vedettes)
+ * 2. Grille : #dle-content .mov (séries/films avec métadonnées)
  */
 export async function fetchCatalog() {
   try {
@@ -43,47 +47,74 @@ export async function fetchCatalog() {
     const $ = cheerio.load(html);
     const items = [];
 
-    // Sélecteurs typiques des CMS de streaming FR (type flavor/flavor-starter)
-    const cardSelectors = [
-      '.mov', '.movie', '.movie-item',
-      '.short-item', '.short',
-      '.item', '.card', '.poster',
-      'article', '.entry',
-      '.film-item', '.serie-item',
-      '.post-item', '.content-item',
-      '#dle-content .short-film',
-    ];
+    // ── Grille principale : div.mov dans #dle-content ──
+    $('#dle-content .mov').each((i, el) => {
+      const $mov = $(el);
 
-    let elements = $([]);
-    for (const sel of cardSelectors) {
-      elements = $(sel);
-      if (elements.length > 0) break;
-    }
+      // URL de la page détail
+      const pageUrl =
+        $mov.find('a.mov-t').attr('href') ||
+        $mov.find('.mov-mask.ps-link').attr('data-link') ||
+        '';
+      if (!pageUrl) return;
 
-    // Fallback : tout lien contenant une image
-    if (elements.length === 0) {
-      $('a[href]').each((i, el) => {
-        const $el = $(el);
-        const $img = $el.find('img').first();
-        if (!$img.length) return;
+      // Titre
+      const title = $mov.find('a.mov-t').text().trim();
 
-        const href = $el.attr('href') || '';
-        if (!href.includes('.html') && !href.includes('/streaming')) return;
-        if (href.includes('#') || href.includes('javascript')) return;
+      // Thumbnail (via /checkimg.php?urli=...)
+      const thumbnail = $mov.find('.mov-i img').attr('src') || '';
 
-        items.push(buildItem(i, $el, $img, href));
+      // Métadonnées
+      const season = $mov.find('.block-sai').text().trim().replace(/\s+/g, ' ');
+      const episode = $mov.find('.block-ep').text().trim();
+      const episodeBadge = $mov.find('.mov-m').text().trim();
+      const language = season.includes('VOSTFR') ? 'VOSTFR' : 'VF';
+
+      // Synopsis depuis movie-text
+      const synopsis = $mov.find('.ml-label').filter((_, el) =>
+        $(el).text().includes('Synopsis')
+      ).next('.ml-desc').text().trim();
+
+      // Année
+      const year = $mov.find('.ml-label').filter((_, el) =>
+        $(el).text().includes('Date de sortie')
+      ).next('.ml-desc').text().trim();
+
+      items.push({
+        id: `mov-${i}`,
+        title: cleanText(title),
+        thumbnail: resolveUrl(thumbnail),
+        pageUrl: resolveUrl(pageUrl),
+        season: cleanText(season),
+        episode: cleanText(episode || episodeBadge),
+        language,
+        year: year || null,
+        synopsis: cleanText(synopsis),
       });
-    } else {
-      elements.each((i, el) => {
-        const $el = $(el);
-        const $link = $el.find('a[href]').first();
-        const $img = $el.find('img').first();
-        const href = $link.attr('href') || '';
-        if (!href) return;
+    });
 
-        items.push(buildItem(i, $el, $img, href, $link));
+    // ── Carousel : films vedettes (si pas déjà dans la grille) ──
+    $('.owl-carousel.caroustyle .item').each((i, el) => {
+      const $item = $(el);
+      const $link = $item.find('a').first();
+      const pageUrl = $link.attr('href') || '';
+      if (!pageUrl) return;
+
+      const title = $item.find('.title1').text().trim();
+      const thumbnail = $item.find('img').attr('src') || '';
+
+      items.push({
+        id: `car-${i}`,
+        title: cleanText(title),
+        thumbnail: resolveUrl(thumbnail),
+        pageUrl: resolveUrl(pageUrl),
+        season: null,
+        episode: null,
+        language: 'VF',
+        year: null,
+        synopsis: null,
       });
-    }
+    });
 
     return dedup(items);
   } catch (error) {
@@ -92,32 +123,46 @@ export async function fetchCatalog() {
   }
 }
 
-function buildItem(index, $container, $img, href, $link) {
-  const title =
-    $container.find('.movie-title, .short-title, h2, h3, h4, .title, [class*="title"]').first().text().trim() ||
-    $img.attr('alt') ||
-    ($link && $link.attr('title')) ||
-    $container.attr('title') ||
-    `Video ${index + 1}`;
+/**
+ * Fetch une page de catalogue paginée.
+ * Ex: fetchCatalogPage(2) → /serie-en-streaming/page/2/
+ */
+export async function fetchCatalogPage(page, category = 'serie-en-streaming') {
+  try {
+    const url = `${BASE_URL}/${category}/page/${page}/`;
+    const { data: html } = await client.get(url);
+    const $ = cheerio.load(html);
+    const items = [];
 
-  const thumbnail =
-    $img.attr('src') ||
-    $img.attr('data-src') ||
-    $img.attr('data-lazy-src') ||
-    $img.attr('data-original') ||
-    '';
+    $('#dle-content .mov').each((i, el) => {
+      const $mov = $(el);
+      const pageUrl = $mov.find('a.mov-t').attr('href') || '';
+      if (!pageUrl) return;
 
-  const quality = $container.find('.quality, .qlty, [class*="qual"]').first().text().trim() || null;
-  const year = $container.find('.year, [class*="year"]').first().text().trim() || null;
+      const title = $mov.find('a.mov-t').text().trim();
+      const thumbnail = $mov.find('.mov-i img').attr('src') || '';
+      const season = $mov.find('.block-sai').text().trim().replace(/\s+/g, ' ');
+      const episode = $mov.find('.block-ep').text().trim();
+      const language = season.includes('VOSTFR') ? 'VOSTFR' : 'VF';
 
-  return {
-    id: `item-${index}`,
-    title: cleanText(title),
-    thumbnail: resolveUrl(thumbnail),
-    pageUrl: resolveUrl(href),
-    quality,
-    year,
-  };
+      items.push({
+        id: `p${page}-${i}`,
+        title: cleanText(title),
+        thumbnail: resolveUrl(thumbnail),
+        pageUrl: resolveUrl(pageUrl),
+        season: cleanText(season),
+        episode: cleanText(episode),
+        language,
+        year: null,
+        synopsis: null,
+      });
+    });
+
+    return dedup(items);
+  } catch (error) {
+    console.error('fetchCatalogPage error:', error.message);
+    return [];
+  }
 }
 
 // ─────────────────────────────────────────────
