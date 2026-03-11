@@ -7,8 +7,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Image,
+  Alert,
 } from 'react-native';
-import { fetchDetail } from '../services/scraper';
+import { fetchDetail, resolveStreamUrl } from '../services/scraper';
+import { downloadVideo } from '../services/download';
 
 export default function DetailScreen({ route, navigation }) {
   const { pageUrl, title: initialTitle, thumbnail } = route.params;
@@ -16,6 +18,8 @@ export default function DetailScreen({ route, navigation }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedEpisode, setSelectedEpisode] = useState(null);
+  const [downloading, setDownloading] = useState(null); // 'ep-1-player-0'
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   const loadDetail = useCallback(async () => {
     try {
@@ -47,6 +51,46 @@ export default function DetailScreen({ route, navigation }) {
     [navigation, detail, initialTitle]
   );
 
+  const handleDownload = useCallback(
+    async (player, ep, playerIdx) => {
+      const dlKey = `${ep.id}-player-${playerIdx}`;
+      setDownloading(dlKey);
+      setDownloadProgress(0);
+
+      try {
+        // D'abord résoudre l'URL du stream
+        const streamUrl = await resolveStreamUrl(player.url);
+
+        // Vérifier que c'est un fichier téléchargeable
+        if (!streamUrl || streamUrl === player.url) {
+          // C'est probablement un embed — on tente quand même
+        }
+
+        const result = await downloadVideo(
+          streamUrl,
+          {
+            title: detail?.title || initialTitle,
+            episodeTitle: ep.title,
+            thumbnail: detail?.poster || thumbnail,
+          },
+          (progress) => setDownloadProgress(progress)
+        );
+
+        if (result.success) {
+          Alert.alert('OK', `"${ep.title}" telecharge !`);
+        } else {
+          Alert.alert('Erreur', result.error || 'Echec du telechargement');
+        }
+      } catch (err) {
+        Alert.alert('Erreur', err.message);
+      } finally {
+        setDownloading(null);
+        setDownloadProgress(0);
+      }
+    },
+    [detail, initialTitle, thumbnail]
+  );
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -61,7 +105,7 @@ export default function DetailScreen({ route, navigation }) {
       <View style={styles.centered}>
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity style={styles.retryBtn} onPress={loadDetail}>
-          <Text style={styles.btnText}>Réessayer</Text>
+          <Text style={styles.btnText}>Reessayer</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.retryBtn, { backgroundColor: '#333', marginTop: 8 }]}
@@ -78,10 +122,10 @@ export default function DetailScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
-      {/* Header avec bouton retour */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backIcon}>{'←'}</Text>
+          <Text style={styles.backIcon}>{'<'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {displayTitle}
@@ -104,11 +148,11 @@ export default function DetailScreen({ route, navigation }) {
           </View>
         </View>
 
-        {/* Liste des épisodes */}
+        {/* Episodes */}
         <Text style={styles.sectionTitle}>
           {detail?.episodes.length === 1 && detail.episodes[0].id === 'film'
             ? 'Lecteurs disponibles'
-            : `${detail?.episodes.length || 0} épisode(s)`}
+            : `${detail?.episodes.length || 0} episode(s)`}
         </Text>
 
         {detail?.episodes.map((ep) => (
@@ -137,18 +181,46 @@ export default function DetailScreen({ route, navigation }) {
             {selectedEpisode?.id === ep.id && (
               <View style={styles.playersList}>
                 {ep.players.length === 0 ? (
-                  <Text style={styles.noPlayer}>Aucun lecteur trouvé</Text>
+                  <Text style={styles.noPlayer}>Aucun lecteur trouve</Text>
                 ) : (
-                  ep.players.map((player, idx) => (
-                    <TouchableOpacity
-                      key={`${ep.id}-player-${idx}`}
-                      style={styles.playerBtn}
-                      onPress={() => handlePlayerPress(player, ep.title)}
-                    >
-                      <Text style={styles.playerIcon}>▶</Text>
-                      <Text style={styles.playerName}>{player.name}</Text>
-                    </TouchableOpacity>
-                  ))
+                  ep.players.map((player, idx) => {
+                    const dlKey = `${ep.id}-player-${idx}`;
+                    const isDownloading = downloading === dlKey;
+
+                    return (
+                      <View key={dlKey} style={styles.playerRow}>
+                        {/* Bouton lecture */}
+                        <TouchableOpacity
+                          style={styles.playerBtn}
+                          onPress={() => handlePlayerPress(player, ep.title)}
+                        >
+                          <Text style={styles.playerIcon}>&#9654;</Text>
+                          <Text style={styles.playerName}>{player.name}</Text>
+                        </TouchableOpacity>
+
+                        {/* Bouton télécharger */}
+                        <TouchableOpacity
+                          style={[
+                            styles.downloadBtn,
+                            isDownloading && styles.downloadBtnActive,
+                          ]}
+                          onPress={() => handleDownload(player, ep, idx)}
+                          disabled={!!downloading}
+                        >
+                          {isDownloading ? (
+                            <View style={styles.downloadProgress}>
+                              <ActivityIndicator size="small" color="#fff" />
+                              <Text style={styles.downloadPercent}>
+                                {Math.round(downloadProgress * 100)}%
+                              </Text>
+                            </View>
+                          ) : (
+                            <Text style={styles.downloadIcon}>&#8595;</Text>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })
                 )}
               </View>
             )}
@@ -262,14 +334,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 8,
   },
+  playerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
   playerBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
     backgroundColor: '#e50914',
     borderRadius: 6,
-    marginVertical: 4,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
   },
   playerIcon: {
     color: '#fff',
@@ -280,6 +359,34 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
+  },
+  downloadBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: '#333',
+    borderRadius: 6,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 48,
+  },
+  downloadBtnActive: {
+    backgroundColor: '#1a5276',
+  },
+  downloadIcon: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  downloadProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  downloadPercent: {
+    color: '#fff',
+    fontSize: 11,
+    marginLeft: 4,
   },
   noPlayer: {
     color: '#888',

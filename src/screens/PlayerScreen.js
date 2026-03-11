@@ -10,7 +10,7 @@ import { resolveStreamUrl } from '../services/scraper';
 import VideoPlayer from '../components/VideoPlayer';
 
 export default function PlayerScreen({ route, navigation }) {
-  const { playerUrl, title } = route.params;
+  const { playerUrl, title, isLocal } = route.params;
   const [streamUrl, setStreamUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -19,6 +19,14 @@ export default function PlayerScreen({ route, navigation }) {
     try {
       setLoading(true);
       setError(null);
+
+      // Fichier local = pas besoin de résoudre
+      if (isLocal) {
+        setStreamUrl(playerUrl);
+        setLoading(false);
+        return;
+      }
+
       const url = await resolveStreamUrl(playerUrl);
       if (url) {
         setStreamUrl(url);
@@ -30,7 +38,7 @@ export default function PlayerScreen({ route, navigation }) {
     } finally {
       setLoading(false);
     }
-  }, [playerUrl]);
+  }, [playerUrl, isLocal]);
 
   useEffect(() => {
     loadStream();

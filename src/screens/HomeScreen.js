@@ -23,6 +23,7 @@ const TABS = [
   { key: 'all', label: 'Accueil' },
   { key: 'series', label: 'S\u00e9ries' },
   { key: 'films', label: 'Films' },
+  { key: 'downloads', label: 'Mes DL' },
 ];
 
 export default function HomeScreen({ navigation }) {
@@ -230,7 +231,13 @@ export default function HomeScreen({ navigation }) {
             <TouchableOpacity
               key={tab.key}
               style={[styles.tab, activeTab === tab.key && styles.tabActive]}
-              onPress={() => setActiveTab(tab.key)}
+              onPress={() => {
+                if (tab.key === 'downloads') {
+                  navigation.navigate('Downloads');
+                  return;
+                }
+                setActiveTab(tab.key);
+              }}
             >
               <Text
                 style={[
